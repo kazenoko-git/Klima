@@ -1,66 +1,115 @@
-from fastapi import FastAPI, Query, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Any
+import json
+import urllib.parse
 
-from backend.models.schemas import RefugeResponse
-from backend.services.optimizer import calculate_and_rank_refuges
-from backend.services.integrations import fetch_weather_data, fetch_tomtom_facilities
+try:
+    from backend.models.schemas import RefugeResponse
+    from backend.services.optimizer import calculate_and_rank_refuges
+    from backend.services.integrations import fetch_weather_data, fetch_tomtom_facilities
+except ImportError:
+    from models.schemas import RefugeResponse
+    from services.optimizer import calculate_and_rank_refuges
+    from services.integrations import fetch_weather_data, fetch_tomtom_facilities
 
-# Explicitly define core FastAPI application instance for Cloudflare Worker & ASGI runtime
-app = FastAPI(
-    title="Klima Climate Refuge API",
-    description="Emergency environmental mapping service for identifying optimal safe zones during extreme weather.",
-    version="1.0.0"
-)
+# Safely import FastAPI if available in local environment
+try:
+    from fastapi import FastAPI, Query, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    
+    app = FastAPI(
+        title="Klima Climate Refuge API",
+        description="Emergency environmental mapping service for identifying optimal safe zones during extreme weather.",
+        version="1.0.0"
+    )
 
-# Enable CORS for Cloudflare Pages frontend and local development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-@app.get("/")
-def health_check():
-    """Health check endpoint for Cloudflare Worker deployment."""
-    return {"status": "online", "service": "Klima Climate Refuge Engine", "edge_runtime": "Cloudflare Workers"}
+    @app.get("/")
+    def health_check():
+        return {"status": "online", "service": "Klima Climate Refuge Engine", "edge_runtime": "Cloudflare Workers"}
 
-@app.get("/api/v1/refuges", response_model=RefugeResponse)
-async def get_top_refuges(
-    lat: float = Query(..., description="Latitude of user location"),
-    lon: float = Query(..., description="Longitude of user location"),
-    radius: int = Query(2000, description="Search radius in meters")
-):
-    """
-    Primary Core Endpoint: Consolidates WeatherAPI, TomTom, BestTime, OpenRoute, and Open-Elevation data.
-    Returns the top 3 climate refuges sorted by AI safety score.
-    """
-    try:
-        return await calculate_and_rank_refuges(user_lat=lat, user_lon=lon, radius_m=radius)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to calculate climate refuges: {str(e)}")
+    @app.get("/api/v1/refuges", response_model=RefugeResponse)
+    async def get_top_refuges(
+        lat: float = Query(..., description="Latitude"),
+        lon: float = Query(..., description="Longitude"),
+        radius: int = Query(2000, description="Search radius in meters")
+    ):
+        try:
+            return await calculate_and_rank_refuges(user_lat=lat, user_lon=lon, radius_m=radius)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to calculate refuges: {str(e)}")
 
-@app.get("/api/v1/weather")
-async def get_weather(
-    lat: float = Query(..., description="Latitude"),
-    lon: float = Query(..., description="Longitude")
-):
-    """Auxiliary Endpoint: Fetches live weather, Heat Index, and AQI for a given location."""
-    try:
+    @app.get("/api/v1/weather")
+    async def get_weather(lat: float = Query(...), lon: float = Query(...)):
         return await fetch_weather_data(lat, lon)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch weather: {str(e)}")
 
-@app.get("/api/v1/facilities")
-async def get_facilities(
-    lat: float = Query(..., description="Latitude"),
-    lon: float = Query(..., description="Longitude"),
-    radius: int = Query(2000, description="Search radius in meters")
-):
-    """Auxiliary Endpoint: Fetches nearby public facilities within search radius."""
-    try:
+    @app.get("/api/v1/facilities")
+    async def get_facilities(lat: float = Query(...), lon: float = Query(...), radius: int = Query(2000)):
         return await fetch_tomtom_facilities(lat, lon, radius)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch facilities: {str(e)}")
+except ImportError:
+    app = None
+
+# Native Cloudflare Workers Entry Point
+async def on_fetch(request, env=None):
+    """
+    Cloudflare Workers Native Entry Point.
+    """
+    try:
+        from js import Response, Headers
+    except ImportError:
+        pass
+
+    url_str = str(request.url)
+    parsed = urllib.parse.urlparse(url_str)
+    path = parsed.path
+    query = urllib.parse.parse_qs(parsed.query)
+
+    headers = Headers.new() if 'Headers' in locals() else {}
+    if hasattr(headers, 'set'):
+        headers.set("Access-Control-Allow-Origin", "*")
+        headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        headers.set("Access-Control-Allow-Headers", "*")
+        headers.set("Content-Type", "application/json")
+
+    def make_response(body_dict, status=200):
+        body_str = json.dumps(body_dict)
+        try:
+            from js import Response
+            return Response.new(body_str, status=status, headers=headers)
+        except Exception:
+            return body_str
+
+    if request.method == "OPTIONS":
+        return make_response({}, status=200)
+
+    if path == "/" or path == "":
+        return make_response({"status": "online", "service": "Klima Climate Refuge Engine", "edge_runtime": "Cloudflare Workers"})
+
+    if path == "/api/v1/refuges":
+        lat = float(query.get("lat", [13.118022])[0])
+        lon = float(query.get("lon", [77.641051])[0])
+        radius = int(query.get("radius", [2000])[0])
+
+        res_data = await calculate_and_rank_refuges(lat, lon, radius)
+        dict_data = res_data.model_dump() if hasattr(res_data, 'model_dump') else (res_data.dict() if hasattr(res_data, 'dict') else res_data)
+        return make_response(dict_data)
+
+    if path == "/api/v1/weather":
+        lat = float(query.get("lat", [13.118022])[0])
+        lon = float(query.get("lon", [77.641051])[0])
+        res_data = await fetch_weather_data(lat, lon)
+        return make_response(res_data)
+
+    if path == "/api/v1/facilities":
+        lat = float(query.get("lat", [13.118022])[0])
+        lon = float(query.get("lon", [77.641051])[0])
+        radius = int(query.get("radius", [2000])[0])
+        res_data = await fetch_tomtom_facilities(lat, lon, radius)
+        return make_response(res_data)
+
+    return make_response({"error": "Not Found"}, status=404)
