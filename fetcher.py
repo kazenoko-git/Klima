@@ -1,8 +1,9 @@
 from src.imports import *
+import os
 
 class Fetcher:
     def __init__(self):
-        self.KEY = "71b4bc4534a644ada68145847262307"
+        self.KEY = os.getenv("WEATHER_API_KEY")
         self.BASE_URL = "http://api.weatherapi.com/v1"
 
         self.default_params = {
