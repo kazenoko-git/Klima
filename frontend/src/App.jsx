@@ -132,17 +132,14 @@ export default function App() {
       }).addTo(markersGroup.current);
     }
 
-    // Dynamic Refuge Markers: Active gets expanded card, Inactive gets compact numbered pin badge
     const refuges = refugesData?.top_refuges || [];
-    const bounds = L.latLngBounds([[userLocation.lat, userLocation.lon]]);
 
     refuges.forEach((refuge, idx) => {
       const isActive = refuge.id === activeRefugeId;
-      bounds.extend([refuge.lat, refuge.lon]);
 
       const markerHtml = isActive ? `
         <div class="relative flex flex-col items-center z-50 transition-all duration-300 transform scale-110">
-          <div class="bg-[#003ec7] text-white border-2 border-white px-3 py-2 rounded-xl shadow-2xl flex flex-col items-center gap-0.5 max-w-[200px]">
+          <div class="bg-[#003ec7] text-white border-2 border-white px-3 py-2 rounded-xl shadow-2xl flex flex-col items-center gap-0.5 max-w-[220px]">
             <span class="font-black text-xs uppercase tracking-tight truncate">${refuge.name}</span>
             <span class="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-blue-900 text-blue-100 uppercase">${refuge.category}</span>
           </div>
@@ -160,12 +157,12 @@ export default function App() {
       const refugeIcon = L.divIcon({
         className: 'custom-refuge-marker',
         html: markerHtml,
-        iconSize: isActive ? [200, 60] : [32, 40],
-        iconAnchor: isActive ? [100, 60] : [16, 40]
+        iconSize: isActive ? [220, 60] : [32, 40],
+        iconAnchor: isActive ? [110, 60] : [16, 40]
       });
 
       const m = L.marker([refuge.lat, refuge.lon], { icon: refugeIcon }).addTo(markersGroup.current);
-      m.on('click', () => setActiveRefugeId(refuge.id));
+      m.on('click', () => handleSelectRefuge(refuge));
 
       if (isActive && refuge.polyline) {
         L.polyline(refuge.polyline, {
@@ -177,15 +174,22 @@ export default function App() {
       }
     });
 
-    if (refuges.length > 0) {
-      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
-    }
-
     setTimeout(() => {
       map.invalidateSize();
     }, 100);
 
   }, [refugesData, activeRefugeId, userLocation, pendingTarget]);
+
+  // Select Refuge & Fly Map Camera directly to selected location
+  const handleSelectRefuge = (refuge) => {
+    setActiveRefugeId(refuge.id);
+    if (leafletInstance.current && refuge.lat && refuge.lon) {
+      leafletInstance.current.flyTo([refuge.lat, refuge.lon], 16, {
+        animate: true,
+        duration: 1.2
+      });
+    }
+  };
 
   const handleConfirmSearch = () => {
     if (!pendingTarget) return;
@@ -194,7 +198,6 @@ export default function App() {
     setPendingTarget(null);
   };
 
-  // Search location via OpenStreetMap Nominatim Geocoding
   const handleSearchSubmit = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -206,6 +209,9 @@ export default function App() {
         const foundLat = Number(data[0].lat);
         const foundLon = Number(data[0].lon);
         setUserLocation({ lat: foundLat, lon: foundLon });
+        if (leafletInstance.current) {
+          leafletInstance.current.flyTo([foundLat, foundLon], 14, { animate: true, duration: 1.5 });
+        }
         await fetchRefuges(foundLat, foundLon);
       } else {
         alert(`Location "${searchQuery}" not found. Please try another place.`);
@@ -315,7 +321,6 @@ export default function App() {
       {/* Bottom Accessible Location Cards Section */}
       <footer className="relative z-30 p-4 glass-panel border-t border-gray-200 shadow-2xl">
         <div className="max-w-7xl mx-auto flex flex-col gap-2">
-          {/* Accessibility & View Controls Bar */}
           <div className="flex items-center justify-between px-2 text-xs font-bold text-gray-600">
             <span className="uppercase tracking-wider">Live Scanned Refuges ({refuges.length})</span>
             <div className="flex items-center gap-3">
@@ -346,7 +351,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Location Cards Container with Mouse Wheel Vertical-to-Horizontal Scroll Converter */}
           {refuges.length > 0 ? (
             <div
               ref={cardScrollContainerRef}
@@ -369,11 +373,11 @@ export default function App() {
                 return (
                   <div
                     key={refuge.id}
-                    onClick={() => setActiveRefugeId(refuge.id)}
+                    onClick={() => handleSelectRefuge(refuge)}
                     className={`
                       ${isGridView ? 'w-full' : 'min-w-[320px] max-w-[360px] flex-shrink-0 snap-center'}
                       p-4 rounded-3xl cursor-pointer transition-all duration-300 flex flex-col justify-between border-2
-                      ${isActive ? 'card-active bg-white' : 'bg-white/90 border-gray-200 hover:border-gray-300'}
+                      ${isActive ? 'card-active bg-white scale-[1.02] shadow-xl border-[#003ec7]' : 'bg-white/90 border-gray-200 hover:border-gray-300'}
                     `}
                   >
                     <div>
@@ -423,7 +427,7 @@ export default function App() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setActiveRefugeId(refuge.id);
+                            handleSelectRefuge(refuge);
                           }}
                           className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-2.5 rounded-2xl text-xs uppercase tracking-wider transition-colors"
                         >
