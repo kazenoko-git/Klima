@@ -148,52 +148,39 @@ async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data:
     return ({}, "Evaluated via MCDA Mathematical Safety Engine")
 
 async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m: int = 2000, worker_env=None) -> RefugeResponse:
-    try:
-        weather_task = fetch_weather_data(user_lat, user_lon)
-        facilities_task = fetch_tomtom_facilities(user_lat, user_lon, radius_m)
-        
-        weather_data, facilities = await asyncio.gather(weather_task, facilities_task)
-    except Exception as e:
-        logger.error(f"Gather weather/facilities error: {e}")
-        weather_data = {"temp_c": 25.0, "feelslike_c": 26.0, "heat_index_c": 27.0, "aqi": 35, "condition": "Clear", "is_raining": False}
-        facilities = [
-            {"id": f"gen_1_{user_lat}", "name": "Central Municipal Library", "category": "Library", "address": "Civic Center", "lat": user_lat + 0.003, "lon": user_lon + 0.003, "indoor_cooling": True},
-            {"id": f"gen_2_{user_lat}", "name": "Metropolitan Transit Station", "category": "Transit Hub", "address": "Central Avenue", "lat": user_lat - 0.003, "lon": user_lon + 0.004, "indoor_cooling": True}
-        ]
+    weather_data, facilities = await asyncio.gather(
+        fetch_weather_data(user_lat, user_lon),
+        fetch_tomtom_facilities(user_lat, user_lon, radius_m)
+    )
 
     weather_info = WeatherInfo(
-        temp_c=weather_data.get("temp_c", 25.0),
-        feelslike_c=weather_data.get("feelslike_c", 26.0),
-        heat_index_c=weather_data.get("heat_index_c", 27.0),
-        aqi=weather_data.get("aqi", 35),
-        condition=weather_data.get("condition", "Clear")
+        temp_c=weather_data["temp_c"],
+        feelslike_c=weather_data["feelslike_c"],
+        heat_index_c=weather_data["heat_index_c"],
+        aqi=weather_data["aqi"],
+        condition=weather_data["condition"]
     )
 
     venue_candidates = []
 
     for facility in facilities:
-        f_lat = facility.get("lat", user_lat)
-        f_lon = facility.get("lon", user_lon)
-        f_name = facility.get("name", "Public Refuge")
+        f_lat = facility["lat"]
+        f_lon = facility["lon"]
+        f_name = facility["name"]
 
-        try:
-            route_task = fetch_walking_route(user_lat, user_lon, f_lat, f_lon)
-            crowd_task = fetch_besttime_crowds(f_name)
-            elevation_task = fetch_elevation(f_lat, f_lon)
-
-            route_data, crowd_level, elevation_m = await asyncio.gather(route_task, crowd_task, elevation_task)
-        except Exception:
-            route_data = {"distance_m": 450.0, "duration_min": 5.5, "polyline": [[user_lat, user_lon], [f_lat, f_lon]]}
-            crowd_level = "Moderate"
-            elevation_m = 25.0
+        route_data, crowd_level, elevation_m = await asyncio.gather(
+            fetch_walking_route(user_lat, user_lon, f_lat, f_lon),
+            fetch_besttime_crowds(f_name),
+            fetch_elevation(f_lat, f_lon)
+        )
 
         mcda_score = calculate_mcda_safety_score(weather_data, facility, route_data, crowd_level, elevation_m)
 
         venue_candidates.append({
-            "id": facility.get("id", f"fac_{f_lat}"),
+            "id": facility["id"],
             "name": f_name,
-            "category": facility.get("category", "Public Refuge"),
-            "address": facility.get("address", "Nearby Safe Sanctuary"),
+            "category": facility["category"],
+            "address": facility["address"],
             "lat": f_lat,
             "lon": f_lon,
             "baseline_score": mcda_score,
