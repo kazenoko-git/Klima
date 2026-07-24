@@ -1,5 +1,4 @@
 from typing import List, Optional
-import json
 
 try:
     from pydantic import BaseModel

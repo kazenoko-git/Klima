@@ -1,5 +1,4 @@
 import logging
-import json
 import math
 import urllib.request
 import urllib.parse
