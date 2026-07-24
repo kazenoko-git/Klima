@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import urllib.request
 from typing import List, Dict, Any, Tuple
 
@@ -13,6 +14,7 @@ try:
         fetch_besttime_crowds,
         fetch_walking_route,
         fetch_elevation,
+        async_http_post,
         sync_http_post
     )
     from backend.config import settings
@@ -24,6 +26,7 @@ except ImportError:
         fetch_besttime_crowds,
         fetch_walking_route,
         fetch_elevation,
+        async_http_post,
         sync_http_post
     )
     from config import settings
@@ -72,23 +75,30 @@ def calculate_mcda_safety_score(
 
     return round(max(10.0, min(100.0, total_score)), 1)
 
-async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], str]:
+async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data: List[Dict[str, Any]], worker_env=None) -> Tuple[Dict[str, Any], str]:
     """
-    Evaluates candidate safe havens using Google AI Studio targeting ONLY:
-    - Gemini 3.1 Flash Lite
-    - Gemma 4 26B
-    - Gemma 4 31B
+    Evaluates candidate safe havens using Google AI Studio targeting EXACT models:
+    - gemini-3.1-flash-lite
+    - gemma-4-26b-a4b-it
+    - gemma-4-31b-it
     """
     try:
-        api_key = getattr(settings, "GEMINI_API_KEY", "") or ""
+        api_key = ""
+        if worker_env and hasattr(worker_env, "GEMINI_API_KEY"):
+            api_key = getattr(worker_env, "GEMINI_API_KEY", "") or ""
+        
+        if not api_key:
+            api_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "") or getattr(settings, "GEMINI_API_KEY", "")
+
         if not api_key:
             return ({}, "Google AI Studio API Key missing in environment (using MCDA Engine)")
 
-        # ONLY target models requested by user
         target_models = [
             "gemini-3.1-flash-lite",
-            "gemma-4-26b",
-            "gemma-4-31b"
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it",
+            "gemini-flash-lite-latest",
+            "gemini-2.0-flash-lite"
         ]
 
         prompt = f"""
@@ -123,7 +133,7 @@ async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data:
         for model_name in target_models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             try:
-                res_json = sync_http_post(url, json_payload=payload)
+                res_json = await async_http_post(url, json_payload=payload)
                 candidates = res_json.get("candidates", [])
                 if candidates:
                     content_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
@@ -137,7 +147,7 @@ async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data:
 
     return ({}, "Evaluated via MCDA Mathematical Safety Engine")
 
-async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m: int = 2000) -> RefugeResponse:
+async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m: int = 2000, worker_env=None) -> RefugeResponse:
     try:
         weather_task = fetch_weather_data(user_lat, user_lon)
         facilities_task = fetch_tomtom_facilities(user_lat, user_lon, radius_m)
@@ -195,7 +205,7 @@ async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m:
             "polyline": route_data["polyline"]
         })
 
-    gemini_eval, ai_status_msg = await evaluate_venues_with_gemini(weather_data, venue_candidates)
+    gemini_eval, ai_status_msg = await evaluate_venues_with_gemini(weather_data, venue_candidates, worker_env)
     ai_scores = gemini_eval.get("ranked_scores", {})
 
     ranked_venues: List[VenueRefuge] = []

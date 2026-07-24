@@ -63,7 +63,7 @@ except ImportError:
 # Native Cloudflare Workers Entry Point
 async def on_fetch(request, env=None):
     """
-    Cloudflare Workers Native Entry Point.
+    Cloudflare Workers Native Entry Point. Passes env bindings directly.
     """
     try:
         from js import Response, Headers
@@ -102,7 +102,7 @@ async def on_fetch(request, env=None):
             lon = float(query.get("lon", [77.641051])[0])
             radius = int(query.get("radius", [2000])[0])
 
-            res_data = await calculate_and_rank_refuges(lat, lon, radius)
+            res_data = await calculate_and_rank_refuges(lat, lon, radius, worker_env=env)
             dict_data = res_data.model_dump() if hasattr(res_data, 'model_dump') else (res_data.dict() if hasattr(res_data, 'dict') else res_data)
             return make_response(dict_data)
 
