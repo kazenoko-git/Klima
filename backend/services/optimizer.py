@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import math
-import requests
+import urllib.request
 from typing import List, Dict, Any
 
 try:
@@ -193,7 +193,6 @@ async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m:
 
     ranked_venues.sort(key=lambda v: v.score, reverse=True)
 
-    # Return top 5 ranked safe zones to support scrollable bottom location menu
     return RefugeResponse(
         current_weather=weather_info,
         top_refuges=ranked_venues[:5]
