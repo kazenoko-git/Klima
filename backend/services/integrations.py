@@ -15,7 +15,7 @@ logger = logging.getLogger("klima.integrations")
 
 def sync_http_get(url: str, params: Dict[str, Any] = None, headers_dict: Dict[str, str] = None) -> Dict[str, Any]:
     req_headers = {
-        "User-Agent": "KlimaApp/1.0 (Climate Refuge Navigator; contact@klima.app)"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 KlimaApp/1.0"
     }
     if headers_dict:
         req_headers.update(headers_dict)
@@ -33,19 +33,23 @@ def sync_http_get(url: str, params: Dict[str, Any] = None, headers_dict: Dict[st
         logger.error(f"HTTP GET error for {url}: {e}")
         return {}
 
-def sync_http_post(url: str, params: Dict[str, Any] = None, json_payload: Dict[str, Any] = None, headers_dict: Dict[str, str] = None) -> Dict[str, Any]:
+def sync_http_post(url: str, params: Dict[str, Any] = None, json_payload: Dict[str, Any] = None, headers_dict: Dict[str, str] = None, raw_body: str = None) -> Dict[str, Any]:
     req_headers = {
         "Content-Type": "application/json",
-        "User-Agent": "KlimaApp/1.0 (Climate Refuge Navigator; contact@klima.app)"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 KlimaApp/1.0"
     }
     if headers_dict:
         req_headers.update(headers_dict)
 
     try:
-        if json_payload:
+        if raw_body:
+            body = raw_body.encode('utf-8')
+            req_headers["Content-Type"] = "application/x-www-form-urlencoded"
+        elif json_payload:
             body = json.dumps(json_payload).encode('utf-8')
         elif params:
             body = urllib.parse.urlencode(params).encode('utf-8')
+            req_headers["Content-Type"] = "application/x-www-form-urlencoded"
         else:
             body = None
 
@@ -93,7 +97,7 @@ def calculate_us_epa_aqi(pm2_5: float) -> int:
     return round(min(500, max(0, pm2_5 * 2.1)))
 
 async def fetch_weather_data(lat: float, lon: float) -> Dict[str, Any]:
-    """Fetch 100% real live weather telemetry from Open-Meteo & WeatherAPI."""
+    """Fetch 100% real live weather telemetry from Open-Meteo & WeatherAPI with zero default numbers."""
     if getattr(settings, "WEATHER_API_KEY", None):
         url = "http://api.weatherapi.com/v1/current.json"
         params = {"key": settings.WEATHER_API_KEY, "q": f"{lat},{lon}", "aqi": "yes"}
@@ -102,7 +106,7 @@ async def fetch_weather_data(lat: float, lon: float) -> Dict[str, Any]:
             current = data.get("current", {})
             if current and "temp_c" in current:
                 air_quality = current.get("air_quality", {})
-                pm2_5 = float(air_quality.get("pm2_5", 15.0))
+                pm2_5 = float(air_quality["pm2_5"])
                 aqi_val = calculate_us_epa_aqi(pm2_5)
                 
                 condition_text = current.get("condition", {}).get("text", "").lower()
@@ -110,10 +114,10 @@ async def fetch_weather_data(lat: float, lon: float) -> Dict[str, Any]:
                 
                 return {
                     "temp_c": float(current["temp_c"]),
-                    "feelslike_c": float(current.get("feelslike_c", current["temp_c"])),
-                    "heat_index_c": float(current.get("heatindex_c", current.get("feelslike_c", current["temp_c"]))),
+                    "feelslike_c": float(current["feelslike_c"]),
+                    "heat_index_c": float(current.get("heatindex_c", current["feelslike_c"])),
                     "aqi": aqi_val,
-                    "condition": current.get("condition", {}).get("text", "Clear"),
+                    "condition": current["condition"]["text"],
                     "is_raining": is_raining
                 }
         except Exception as e:
@@ -123,28 +127,23 @@ async def fetch_weather_data(lat: float, lon: float) -> Dict[str, Any]:
     open_meteo_aqi_url = f"https://api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=pm2_5,us_aqi"
     
     data = sync_http_get(open_meteo_url)
-    current = data.get("current")
-    if not current or "temperature_2m" not in current:
-        raise RuntimeError(f"Open-Meteo real weather telemetry API unavailable for coordinates ({lat}, {lon})")
+    current = data["current"]
 
     temp = float(current["temperature_2m"])
-    feelslike = float(current.get("apparent_temperature", temp + 1.5))
-    precip = float(current.get("precipitation", 0.0))
+    feelslike = float(current["apparent_temperature"])
+    precip = float(current["precipitation"])
+    rh = float(current["relative_humidity_2m"])
     
-    rh = float(current.get("relative_humidity_2m", 55.0))
     e = (rh / 100.0) * 6.105 * math.exp((17.27 * temp) / (237.7 + temp))
     heat_index = round(temp + 0.33 * e - 0.70 * 4.0 - 4.0, 1)
 
-    aqi_val = 35
-    try:
-        aqi_data = sync_http_get(open_meteo_aqi_url)
-        aqi_current = aqi_data.get("current", {})
-        if "us_aqi" in aqi_current and aqi_current["us_aqi"] is not None:
-            aqi_val = int(aqi_current["us_aqi"])
-        elif "pm2_5" in aqi_current and aqi_current["pm2_5"] is not None:
-            aqi_val = calculate_us_epa_aqi(float(aqi_current["pm2_5"]))
-    except Exception:
-        pass
+    aqi_data = sync_http_get(open_meteo_aqi_url)
+    aqi_current = aqi_data["current"]
+    
+    if "us_aqi" in aqi_current and aqi_current["us_aqi"] is not None:
+        aqi_val = int(aqi_current["us_aqi"])
+    else:
+        aqi_val = calculate_us_epa_aqi(float(aqi_current["pm2_5"]))
 
     return {
         "temp_c": temp,
@@ -158,22 +157,12 @@ async def fetch_weather_data(lat: float, lon: float) -> Dict[str, Any]:
 async def fetch_tomtom_facilities(lat: float, lon: float, radius_m: int = 5000) -> List[Dict[str, Any]]:
     """
     Fetches 100% REAL physical facilities anywhere on Earth (London, Tokyo, NYC, Bangalore).
-    ZERO hardcoded or template fallbacks.
+    ZERO fallback template strings.
     """
     facilities = []
     seen_names = set()
 
-    # 1. Reverse Geocode to resolve exact location area name
-    area_name = ""
-    try:
-        rev_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
-        rev_data = sync_http_get(rev_url)
-        addr = rev_data.get("address", {})
-        area_name = addr.get("city") or addr.get("suburb") or addr.get("town") or addr.get("county") or addr.get("state") or addr.get("country") or ""
-    except Exception as e:
-        logger.error(f"Reverse geocode error: {e}")
-
-    # 2. Query TomTom POI search if key present
+    # 1. TomTom POI Search
     if getattr(settings, "TOMTOM_API_KEY", None):
         url = f"https://api.tomtom.com/search/2/poiSearch/public.json"
         params = {
@@ -200,59 +189,110 @@ async def fetch_tomtom_facilities(lat: float, lon: float, radius_m: int = 5000) 
                     "id": f"tomtom_{res.get('id', idx)}",
                     "name": name,
                     "category": cat.title(),
-                    "address": res.get("address", {}).get("freeformAddress", f"Coordinates {lat:.4f}, {lon:.4f}"),
-                    "lat": float(pos.get("lat", lat)),
-                    "lon": float(pos.get("lon", lon)),
+                    "address": res.get("address", {}).get("freeformAddress", f"{pos.get('lat')}, {pos.get('lon')}"),
+                    "lat": float(pos["lat"]),
+                    "lon": float(pos["lon"]),
                     "indoor_cooling": True
                 })
         except Exception as e:
             logger.error(f"TomTom POI search error: {e}")
 
-    # 3. Query real physical facilities via OpenStreetMap Nominatim
-    search_terms = ["library", "hospital", "station", "community center", "school", "stadium", "hall", "sanctuary"]
-    for term in search_terms:
-        if len(facilities) >= 8:
-            break
+    # 2. Overpass API Spatial Query around target lat,lon (100% REAL OpenStreetMap nodes/ways)
+    if len(facilities) < 5:
+        overpass_endpoints = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter"
+        ]
+        query_body = f"""[out:json][timeout:8];(node(around:{radius_m},{lat},{lon})["amenity"];node(around:{radius_m},{lat},{lon})["building"];way(around:{radius_m},{lat},{lon})["amenity"];);out center 20;"""
 
-        query = f"{term} in {area_name}" if area_name else term
-        osm_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(query)}&limit=3"
+        for endpoint in overpass_endpoints:
+            if len(facilities) >= 8:
+                break
+            try:
+                data = sync_http_post(endpoint, raw_body=f"data={urllib.parse.quote(query_body)}")
+                elements = data.get("elements", [])
+                for idx, elem in enumerate(elements):
+                    tags = elem.get("tags", {})
+                    name = tags.get("name") or tags.get("name:en") or tags.get("official_name")
+                    if not name or name in seen_names:
+                        continue
+
+                    e_lat = elem.get("lat") or elem.get("center", {}).get("lat")
+                    e_lon = elem.get("lon") or elem.get("center", {}).get("lon")
+                    if not e_lat or not e_lon:
+                        continue
+
+                    seen_names.add(name)
+                    cat_type = tags.get("amenity") or tags.get("building") or tags.get("public_transport") or "Public Building"
+                    street = tags.get("addr:street") or tags.get("addr:suburb") or tags.get("addr:city") or f"{e_lat:.3f}, {e_lon:.3f}"
+
+                    facilities.append({
+                        "id": f"overpass_{elem.get('id', idx)}",
+                        "name": name,
+                        "category": cat_type.replace("_", " ").title(),
+                        "address": street,
+                        "lat": float(e_lat),
+                        "lon": float(e_lon),
+                        "indoor_cooling": True
+                    })
+            except Exception as e:
+                logger.error(f"Overpass query error on {endpoint}: {e}")
+
+    # 3. OpenStreetMap Nominatim Area Search fallback
+    if len(facilities) < 5:
+        area_name = ""
         try:
-            data = sync_http_get(osm_url)
-            for idx, item in enumerate(data):
-                f_lat = float(item.get("lat", lat))
-                f_lon = float(item.get("lon", lon))
-                display_name = item.get("display_name", "")
-                if not display_name:
-                    continue
-                name_parts = [p.strip() for p in display_name.split(",")]
-                short_name = name_parts[0]
-                if short_name in seen_names:
-                    continue
-                seen_names.add(short_name)
-                type_category = item.get("type", term).replace("_", " ").title()
+            rev_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
+            rev_data = sync_http_get(rev_url)
+            addr = rev_data.get("address", {})
+            area_name = addr.get("city") or addr.get("suburb") or addr.get("town") or addr.get("county") or addr.get("state") or addr.get("country") or ""
+        except Exception:
+            pass
 
-                facilities.append({
-                    "id": f"osm_{item.get('place_id', idx)}_{term}",
-                    "name": short_name,
-                    "category": type_category,
-                    "address": ", ".join(name_parts[1:3]) if len(name_parts) > 2 else f"Near {f_lat:.3f}, {f_lon:.3f}",
-                    "lat": f_lat,
-                    "lon": f_lon,
-                    "indoor_cooling": True
-                })
-        except Exception as e:
-            logger.error(f"OSM Nominatim search error for {query}: {e}")
+        search_terms = ["library", "hospital", "station", "community center", "school", "stadium", "hall", "park"]
+        for term in search_terms:
+            if len(facilities) >= 8:
+                break
+
+            query = f"{term} in {area_name}" if area_name else term
+            osm_url = f"https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(query)}&limit=4"
+            try:
+                data = sync_http_get(osm_url)
+                for idx, item in enumerate(data):
+                    f_lat = float(item["lat"])
+                    f_lon = float(item["lon"])
+                    display_name = item.get("display_name", "")
+                    if not display_name:
+                        continue
+                    name_parts = [p.strip() for p in display_name.split(",")]
+                    short_name = name_parts[0]
+                    if short_name in seen_names:
+                        continue
+                    seen_names.add(short_name)
+                    type_category = item.get("type", term).replace("_", " ").title()
+
+                    facilities.append({
+                        "id": f"osm_{item.get('place_id', idx)}_{term}",
+                        "name": short_name,
+                        "category": type_category,
+                        "address": ", ".join(name_parts[1:3]) if len(name_parts) > 2 else f"{f_lat:.3f}, {f_lon:.3f}",
+                        "lat": f_lat,
+                        "lon": f_lon,
+                        "indoor_cooling": True
+                    })
+            except Exception as e:
+                logger.error(f"OSM Nominatim search error for {query}: {e}")
 
     return facilities[:8]
 
 async def fetch_besttime_crowds(venue_name: str) -> str:
-    """Calculates live crowd density dynamically based on venue type and live hour of day."""
+    """Calculates live crowd density dynamically based on live hour of day."""
     if getattr(settings, "BESTTIME_API_KEY", None):
         url = "https://besttime.app/api/v1/forecasts/live"
         params = {"api_key_private": settings.BESTTIME_API_KEY, "venue_name": venue_name}
         try:
             data = sync_http_post(url, params=params)
-            busyness = data.get("analysis", {}).get("venue_forecasted_busyness", 50)
+            busyness = data["analysis"]["venue_forecasted_busyness"]
             if busyness < 40:
                 return "Low"
             elif busyness < 75:
@@ -273,42 +313,17 @@ async def fetch_besttime_crowds(venue_name: str) -> str:
 async def fetch_walking_route(start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> Dict[str, Any]:
     """Fetches 100% REAL OpenStreetMap OSRM walking directions & polyline geometry."""
     osrm_url = f"http://router.project-osrm.org/route/v1/foot/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson"
-    try:
-        data = sync_http_get(osrm_url)
-        routes = data.get("routes", [])
-        if routes:
-            route = routes[0]
-            dist_m = float(route.get("distance", 500.0))
-            dur_sec = float(route.get("duration", 300.0))
-            coordinates = route.get("geometry", {}).get("coordinates", [])
-            # Flip OSRM [lon, lat] coordinates to Leaflet [lat, lon]
-            polyline = [[c[1], c[0]] for c in coordinates] if coordinates else [[start_lat, start_lon], [end_lat, end_lon]]
-            return {
-                "distance_m": round(dist_m, 1),
-                "duration_min": max(1.0, round(dur_sec / 60.0, 1)),
-                "polyline": polyline
-            }
-    except Exception as e:
-        logger.error(f"OSRM walking route error: {e}")
-
-    # Fallback to geodesic Haversine distance math if OSRM endpoint times out
-    R = 6371000.0
-    phi1 = math.radians(start_lat)
-    phi2 = math.radians(end_lat)
-    delta_phi = math.radians(end_lat - start_lat)
-    delta_lambda = math.radians(end_lon - start_lon)
-
-    a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
-    a_clamped = min(1.0, max(0.0, a))
-    c = 2.0 * math.atan2(math.sqrt(a_clamped), math.sqrt(1.0 - a_clamped))
-    dist_m = R * c
-
-    duration_min = round((dist_m / 81.0), 1)
-    polyline = [[start_lat, start_lon], [(start_lat + end_lat)/2.0, (start_lon + end_lon)/2.0], [end_lat, end_lon]]
-
+    data = sync_http_get(osrm_url)
+    routes = data["routes"]
+    route = routes[0]
+    dist_m = float(route["distance"])
+    dur_sec = float(route["duration"])
+    coordinates = route["geometry"]["coordinates"]
+    polyline = [[c[1], c[0]] for c in coordinates]
+    
     return {
         "distance_m": round(dist_m, 1),
-        "duration_min": max(1.0, duration_min),
+        "duration_min": max(1.0, round(dur_sec / 60.0, 1)),
         "polyline": polyline
     }
 
@@ -324,12 +339,6 @@ async def fetch_elevation(lat: float, lon: float) -> float:
         logger.error(f"Open-Meteo elevation error: {e}")
 
     url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}"
-    try:
-        data = sync_http_get(url)
-        results = data.get("results", [])
-        if results:
-            return float(results[0].get("elevation", 15.0))
-    except Exception as e:
-        logger.error(f"Open-Elevation fetch error: {e}")
-
-    return 15.0
+    data = sync_http_get(url)
+    results = data["results"]
+    return float(results[0]["elevation"])

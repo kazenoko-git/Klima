@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const API_BASE_URL = "https://klima-backend.kazenoko-main.workers.dev";
+// Connect directly to local uvicorn backend
+const API_BASE_URL = "http://localhost:8000";
 
 export default function App() {
   const [userLocation, setUserLocation] = useState({ lat: 13.118022, lon: 77.641051 });
@@ -59,7 +60,7 @@ export default function App() {
     };
   }, []);
 
-  // Fetch safe zones from Cloudflare Workers backend
+  // Fetch safe zones from local uvicorn backend
   const fetchRefuges = async (lat, lon) => {
     setIsLoading(true);
     try {
@@ -383,7 +384,7 @@ export default function App() {
                     <div>
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="bg-[#003ec7] text-white text-xs font-black px-2 py-0.5 rounded-full">{idx + 1}</span>
+                          <span className="bg-[#003ec7] text-[#ffffff] text-xs font-black px-2 py-0.5 rounded-full">{idx + 1}</span>
                           <div>
                             <h3 className="text-base font-black text-[#131b2e] tracking-tight uppercase line-clamp-1">{refuge.name}</h3>
                             <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
