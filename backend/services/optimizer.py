@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import requests
 from typing import List, Dict, Any
 
 try:
@@ -12,7 +13,7 @@ try:
         fetch_besttime_crowds,
         fetch_walking_route,
         fetch_elevation,
-        async_http_post
+        sync_http_post
     )
     from backend.config import settings
 except ImportError:
@@ -23,7 +24,7 @@ except ImportError:
         fetch_besttime_crowds,
         fetch_walking_route,
         fetch_elevation,
-        async_http_post
+        sync_http_post
     )
     from config import settings
 
@@ -36,11 +37,7 @@ def calculate_mcda_safety_score(
     crowd_level: str,
     elevation_m: float
 ) -> float:
-    """
-    Computes an objective, multi-criteria safety score (0.0 to 100.0) based on mathematical MCDA weighting:
-    Score = 100 * (0.35 * S_climate + 0.25 * S_crowd + 0.20 * S_elevation + 0.20 * S_proximity)
-    """
-    # 1. Climate Protection Sub-score (Weight: 0.35)
+    """Computes an objective multi-criteria safety score (0.0 to 100.0)."""
     heat_index = weather_data.get("heat_index_c", 25.0)
     aqi = weather_data.get("aqi", 30)
     
@@ -50,28 +47,23 @@ def calculate_mcda_safety_score(
     else:
         s_climate = 0.85
 
-    # 2. Crowd Sub-score (Weight: 0.25)
     crowd_map = {"Low": 1.0, "Moderate": 0.65, "High": 0.25}
     s_crowd = crowd_map.get(crowd_level, 0.65)
 
-    # 3. Elevation & Flood Risk Sub-score (Weight: 0.20)
     is_raining = weather_data.get("is_raining", False)
     if is_raining:
         if elevation_m < 10.0:
-            s_elevation = 0.15 # Severe flood hazard penalty
+            s_elevation = 0.15
         elif elevation_m < 20.0:
             s_elevation = 0.50
         else:
             s_elevation = 1.0
     else:
-        # Standard terrain safety normalization
         s_elevation = min(1.0, max(0.4, elevation_m / 100.0))
 
-    # 4. Proximity Sub-score (Weight: 0.20) - Exponential Decay function: exp(-dist / 1500m)
     dist_m = route_data.get("distance_m", 500.0)
     s_proximity = math.exp(-dist_m / 1500.0)
 
-    # Weighted Composite MCDA Score Calculation
     total_score = 100.0 * (
         0.35 * s_climate +
         0.25 * s_crowd +
@@ -82,9 +74,7 @@ def calculate_mcda_safety_score(
     return round(max(10.0, min(100.0, total_score)), 1)
 
 async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Passes climate & location telemetry to Google AI Studio (Gemini 2.0 / Flash / Gemma) to refine scores.
-    """
+    """Passes climate & location telemetry to Google AI Studio via Python requests."""
     if not getattr(settings, "GEMINI_API_KEY", None):
         return {}
 
@@ -120,18 +110,7 @@ async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data:
     }
 
     try:
-        from js import fetch, Headers
-        headers = Headers.new()
-        headers.set("Content-Type", "application/json")
-        from js import Object
-        js_options = Object.fromEntries({
-            "method": "POST",
-            "body": json.dumps(payload),
-            "headers": headers
-        }.items())
-        response = await fetch(url, js_options)
-        text = await response.text()
-        res_json = json.loads(text)
+        res_json = sync_http_post(url, json_payload=payload)
         candidates = res_json.get("candidates", [])
         if candidates:
             content_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
@@ -142,10 +121,7 @@ async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data:
     return {}
 
 async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m: int = 2000) -> RefugeResponse:
-    """
-    Consolidates real-time data from WeatherAPI, TomTom, BestTime, OpenRoute, and Open-Elevation.
-    Ranks facilities using mathematical MCDA scoring and Google AI Studio Gemini API.
-    """
+    """Consolidates data and ranks facilities using MCDA scoring & Gemini API."""
     weather_task = fetch_weather_data(user_lat, user_lon)
     facilities_task = fetch_tomtom_facilities(user_lat, user_lon, radius_m)
     
@@ -172,7 +148,6 @@ async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m:
 
         route_data, crowd_level, elevation_m = await asyncio.gather(route_task, crowd_task, elevation_task)
 
-        # Compute mathematical MCDA Safety Score
         mcda_score = calculate_mcda_safety_score(weather_data, facility, route_data, crowd_level, elevation_m)
 
         venue_candidates.append({
@@ -191,7 +166,6 @@ async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m:
             "polyline": route_data["polyline"]
         })
 
-    # Optional Google AI Studio Gemini refinement
     gemini_eval = await evaluate_venues_with_gemini(weather_data, venue_candidates)
     ai_scores = gemini_eval.get("ranked_scores", {})
 
@@ -220,7 +194,6 @@ async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m:
         )
         ranked_venues.append(venue_obj)
 
-    # Sort descending by AI / MCDA Safety Score
     ranked_venues.sort(key=lambda v: v.score, reverse=True)
 
     return RefugeResponse(
