@@ -7,6 +7,7 @@ export default function App() {
   const [pendingTarget, setPendingTarget] = useState(null); // Click-and-Confirm target
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(null);
   const [refugesData, setRefugesData] = useState(null);
   const [activeRefugeId, setActiveRefugeId] = useState(null);
 
@@ -57,18 +58,30 @@ export default function App() {
     };
   }, []);
 
-  // Fetch safe zones from Cloudflare Workers backend
+  // Fetch safe zones from backend service
   const fetchRefuges = async (lat, lon) => {
     setIsLoading(true);
+    setErrorMsg(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/refuges?lat=${lat}&lon=${lon}&radius=2000`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || errBody.detail || `Server error (HTTP ${res.status})`);
+      }
       const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
       setRefugesData(data);
       if (data.top_refuges && data.top_refuges.length > 0) {
         setActiveRefugeId(data.top_refuges[0].id);
+      } else {
+        setErrorMsg("No public refuges located within 2km of these coordinates.");
       }
     } catch (err) {
       console.error("Failed to fetch refuges:", err);
+      setErrorMsg(err.message || "Failed to load refuges from server.");
+      setRefugesData(null);
     } finally {
       setIsLoading(false);
     }
@@ -123,7 +136,7 @@ export default function App() {
         iconAnchor: [100, 100]
       });
       
-      const pMarker = L.marker([pendingTarget.lat, pendingTarget.lon], { icon: targetIcon }).addTo(markersGroup.current);
+      L.marker([pendingTarget.lat, pendingTarget.lon], { icon: targetIcon }).addTo(markersGroup.current);
       
       // Radius circle
       L.circle([pendingTarget.lat, pendingTarget.lon], {
@@ -178,16 +191,28 @@ export default function App() {
     setPendingTarget(null);
   };
 
-  // Search Bar Submit
-  const handleSearchSubmit = (e) => {
+  // Search Bar Geocoding Submit using OpenStreetMap Nominatim API
+  const handleSearchSubmit = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    const shifted = {
-      lat: Number((userLocation.lat + 0.006).toFixed(6)),
-      lon: Number((userLocation.lon + 0.006).toFixed(6))
-    };
-    setUserLocation(shifted);
-    fetchRefuges(shifted.lat, shifted.lon);
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`);
+      const results = await response.json();
+      if (results && results.length > 0) {
+        const foundLat = Number(parseFloat(results[0].lat).toFixed(6));
+        const foundLon = Number(parseFloat(results[0].lon).toFixed(6));
+        setUserLocation({ lat: foundLat, lon: foundLon });
+        await fetchRefuges(foundLat, foundLon);
+      } else {
+        setErrorMsg(`Could not find coordinates for location "${searchQuery}".`);
+        setIsLoading(false);
+      }
+    } catch (err) {
+      setErrorMsg(`Geocoding failed: ${err.message}`);
+      setIsLoading(false);
+    }
   };
 
   // Navigation Trigger
@@ -195,58 +220,8 @@ export default function App() {
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`, '_blank');
   };
 
-  const weather = refugesData?.current_weather || {
-    temp_c: 25.0,
-    feelslike_c: 25.8,
-    heat_index_c: 28.8,
-    aqi: 66,
-    condition: 'Partly cloudy'
-  };
-
-  const refuges = refugesData?.top_refuges || [
-    {
-      id: "card-1",
-      name: "Delhi Public School",
-      category: "High School",
-      address: "35/1A, Bagalur Cross Road, Bagalur, Bengaluru",
-      lat: 13.118699,
-      lon: 77.641793,
-      score: 84.6,
-      distance_m: 110.1,
-      duration_min: 1.4,
-      crowd_level: "Moderate",
-      elevation_m: 931.0,
-      indoor_cooling: true
-    },
-    {
-      id: "card-2",
-      name: "Westline Public School",
-      category: "High School",
-      address: "1St Main Bande Road, Srinivaspur, Bengaluru",
-      lat: 13.104045,
-      lon: 77.633575,
-      score: 72.2,
-      distance_m: 1752.4,
-      duration_min: 21.6,
-      crowd_level: "Moderate",
-      elevation_m: 921.0,
-      indoor_cooling: true
-    },
-    {
-      id: "card-3",
-      name: "Lumbini International Public School",
-      category: "Pre School",
-      address: "52/1, Palanahalli Road, Srinivaspur, Bengaluru",
-      lat: 13.116028,
-      lon: 77.624724,
-      score: 72.1,
-      distance_m: 1782.0,
-      duration_min: 22.0,
-      crowd_level: "Moderate",
-      elevation_m: 908.0,
-      indoor_cooling: true
-    }
-  ];
+  const weather = refugesData?.current_weather;
+  const refuges = refugesData?.top_refuges || [];
 
   return (
     <div className="bg-[#faf8ff] text-[#131b2e] h-screen w-screen overflow-hidden relative flex flex-col font-sans">
@@ -286,17 +261,40 @@ export default function App() {
 
         {/* Climate Alert HUD */}
         <div className="flex items-center gap-3">
-          <div className="bg-[#ffb347]/20 border-2 border-[#ffb347] px-4 py-1.5 rounded-2xl flex items-center gap-3 text-[#131b2e]">
-            <span className="material-symbols-outlined text-amber-600">warning</span>
-            <div>
-              <div className="font-black text-xs uppercase tracking-tight">HEAT & AQI ALERT</div>
-              <div className="text-xs font-bold text-gray-700">
-                Heat Index {weather.heat_index_c}°C • AQI {weather.aqi}
+          {weather ? (
+            <div className="bg-[#ffb347]/20 border-2 border-[#ffb347] px-4 py-1.5 rounded-2xl flex items-center gap-3 text-[#131b2e]">
+              <span className="material-symbols-outlined text-amber-600">warning</span>
+              <div>
+                <div className="font-black text-xs uppercase tracking-tight">HEAT & AQI TELEMETRY</div>
+                <div className="text-xs font-bold text-gray-700">
+                  Heat Index {weather.heat_index_c}°C • AQI {weather.aqi} ({weather.condition})
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-red-100 border border-red-300 text-red-700 px-4 py-1.5 rounded-2xl text-xs font-bold flex items-center gap-2">
+              <span className="material-symbols-outlined text-red-500">error</span>
+              <span>Weather Telemetry Unavailable</span>
+            </div>
+          )}
         </div>
       </header>
+
+      {/* Error Alert Display Banner */}
+      {errorMsg && (
+        <div className="relative z-40 bg-red-600 text-white px-6 py-3 shadow-xl flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="material-symbols-outlined text-white text-xl">warning</span>
+            <span className="text-sm font-bold">{errorMsg}</span>
+          </div>
+          <button
+            onClick={() => setErrorMsg(null)}
+            className="text-white hover:text-gray-200 text-xs font-bold uppercase tracking-wider underline ml-4"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Main Interactive Leaflet Map Area */}
       <main className="relative flex-1 w-full h-full overflow-hidden">
@@ -327,74 +325,82 @@ export default function App() {
 
       {/* Bottom Cards - Top 3 Safe Zones */}
       <footer className="relative z-30 p-6 glass-panel border-t border-gray-200 shadow-2xl">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
-          {refuges.map((refuge) => {
-            const isActive = refuge.id === activeRefugeId;
-            const scoreColor = refuge.score >= 80 ? 'bg-emerald-500 text-white' : refuge.score >= 60 ? 'bg-gray-400 text-white' : 'bg-red-500 text-white';
-            const crowdColor = refuge.crowd_level === 'Low' ? 'text-emerald-600' : refuge.crowd_level === 'Moderate' ? 'text-amber-500' : 'text-red-500';
+        {refuges.length > 0 ? (
+          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+            {refuges.map((refuge) => {
+              const isActive = refuge.id === activeRefugeId;
+              const scoreColor = refuge.score >= 80 ? 'bg-emerald-500 text-white' : refuge.score >= 60 ? 'bg-gray-400 text-white' : 'bg-red-500 text-white';
+              const crowdColor = refuge.crowd_level === 'Low' ? 'text-emerald-600' : refuge.crowd_level === 'Moderate' ? 'text-amber-500' : 'text-red-500';
 
-            return (
-              <div
-                key={refuge.id}
-                onClick={() => setActiveRefugeId(refuge.id)}
-                className={`p-5 rounded-3xl cursor-pointer transition-all duration-300 flex flex-col justify-between border-2 ${isActive ? 'card-active' : 'bg-white/90 border-gray-200 hover:border-gray-300'}`}
-              >
-                <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="text-lg font-black text-[#131b2e] tracking-tight uppercase">{refuge.name}</h3>
-                      <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
+              return (
+                <div
+                  key={refuge.id}
+                  onClick={() => setActiveRefugeId(refuge.id)}
+                  className={`p-5 rounded-3xl cursor-pointer transition-all duration-300 flex flex-col justify-between border-2 ${isActive ? 'card-active' : 'bg-white/90 border-gray-200 hover:border-gray-300'}`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 className="text-lg font-black text-[#131b2e] tracking-tight uppercase">{refuge.name}</h3>
+                        <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase shadow-sm ${scoreColor}`}>
+                        🛡️ {Math.round(refuge.score)} SCORE
+                      </span>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase shadow-sm ${scoreColor}`}>
-                      🛡️ {Math.round(refuge.score)} SCORE
-                    </span>
+
+                    <div className="flex items-baseline justify-between my-3">
+                      <div>
+                        <span className="text-3xl font-black text-[#003ec7] tracking-tight">{Math.round(refuge.duration_min)} MIN</span>
+                        <span className="text-xs font-bold text-gray-400 uppercase block">WALK TIME</span>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-sm font-black tracking-wider uppercase ${crowdColor}`}>{refuge.crowd_level.toUpperCase()}</span>
+                        <span className="text-xs font-bold text-gray-400 uppercase block">CROWD STATUS</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs font-bold text-gray-600 pt-2 border-t border-gray-100">
+                      <span>⛰️ {Math.round(refuge.elevation_m)}M ELEVATION</span>
+                      <span>📍 {(refuge.distance_m / 1000).toFixed(1)} KM DISTANCE</span>
+                    </div>
                   </div>
 
-                  <div className="flex items-baseline justify-between my-3">
-                    <div>
-                      <span className="text-3xl font-black text-[#003ec7] tracking-tight">{Math.round(refuge.duration_min)} MIN</span>
-                      <span className="text-xs font-bold text-gray-400 uppercase block">WALK TIME</span>
-                    </div>
-                    <div className="text-right">
-                      <span className={`text-sm font-black tracking-wider uppercase ${crowdColor}`}>{refuge.crowd_level.toUpperCase()}</span>
-                      <span className="text-xs font-bold text-gray-400 uppercase block">CROWD STATUS</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-600 pt-2 border-t border-gray-100">
-                    <span>⛰️ {Math.round(refuge.elevation_m)}M ELEVATION</span>
-                    <span>📍 {(refuge.distance_m / 1000).toFixed(1)} KM DISTANCE</span>
+                  <div className="mt-4">
+                    {isActive ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGoHere(refuge.lat, refuge.lon);
+                        }}
+                        className="w-full bg-[#003ec7] hover:bg-[#003ec7]/90 text-white font-black py-3 rounded-2xl text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <span className="material-symbols-outlined text-sm">near_me</span>
+                        <span>GO HERE (GOOGLE MAPS)</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveRefugeId(refuge.id);
+                        }}
+                        className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-2xl text-xs uppercase tracking-wider transition-colors"
+                      >
+                        VIEW REFUGE
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                <div className="mt-4">
-                  {isActive ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleGoHere(refuge.lat, refuge.lon);
-                      }}
-                      className="w-full bg-[#003ec7] hover:bg-[#003ec7]/90 text-white font-black py-3 rounded-2xl text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2"
-                    >
-                      <span className="material-symbols-outlined text-sm">near_me</span>
-                      <span>GO HERE (GOOGLE MAPS)</span>
-                    </button>
-                  ) : (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveRefugeId(refuge.id);
-                      }}
-                      className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-2xl text-xs uppercase tracking-wider transition-colors"
-                    >
-                      VIEW REFUGE
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="max-w-7xl mx-auto py-8 text-center bg-white/70 rounded-3xl border border-gray-200">
+            <span className="material-symbols-outlined text-4xl text-gray-400 mb-2">location_off</span>
+            <p className="text-base font-bold text-gray-700">No Climate Refuges Available</p>
+            <p className="text-xs text-gray-500 mt-1">Select another position on the map or search for a location to locate nearby refuges.</p>
+          </div>
+        )}
       </footer>
     </div>
   );
