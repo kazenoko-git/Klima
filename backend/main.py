@@ -46,11 +46,17 @@ try:
 
     @app.get("/api/v1/weather")
     async def get_weather(lat: float = Query(...), lon: float = Query(...)):
-        return await fetch_weather_data(lat, lon)
+        try:
+            return await fetch_weather_data(lat, lon)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Weather fetch failed: {str(e)}")
 
     @app.get("/api/v1/facilities")
     async def get_facilities(lat: float = Query(...), lon: float = Query(...), radius: int = Query(2000)):
-        return await fetch_tomtom_facilities(lat, lon, radius)
+        try:
+            return await fetch_tomtom_facilities(lat, lon, radius)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Facilities fetch failed: {str(e)}")
 except ImportError:
     app = None
 
@@ -90,26 +96,29 @@ async def on_fetch(request, env=None):
     if path == "/" or path == "":
         return make_response({"status": "online", "service": "Klima Climate Refuge Engine", "edge_runtime": "Cloudflare Workers"})
 
-    if path == "/api/v1/refuges":
-        lat = float(query.get("lat", [13.118022])[0])
-        lon = float(query.get("lon", [77.641051])[0])
-        radius = int(query.get("radius", [2000])[0])
+    try:
+        if path == "/api/v1/refuges":
+            lat = float(query.get("lat", [13.118022])[0])
+            lon = float(query.get("lon", [77.641051])[0])
+            radius = int(query.get("radius", [2000])[0])
 
-        res_data = await calculate_and_rank_refuges(lat, lon, radius)
-        dict_data = res_data.model_dump() if hasattr(res_data, 'model_dump') else (res_data.dict() if hasattr(res_data, 'dict') else res_data)
-        return make_response(dict_data)
+            res_data = await calculate_and_rank_refuges(lat, lon, radius)
+            dict_data = res_data.model_dump() if hasattr(res_data, 'model_dump') else (res_data.dict() if hasattr(res_data, 'dict') else res_data)
+            return make_response(dict_data)
 
-    if path == "/api/v1/weather":
-        lat = float(query.get("lat", [13.118022])[0])
-        lon = float(query.get("lon", [77.641051])[0])
-        res_data = await fetch_weather_data(lat, lon)
-        return make_response(res_data)
+        if path == "/api/v1/weather":
+            lat = float(query.get("lat", [13.118022])[0])
+            lon = float(query.get("lon", [77.641051])[0])
+            res_data = await fetch_weather_data(lat, lon)
+            return make_response(res_data)
 
-    if path == "/api/v1/facilities":
-        lat = float(query.get("lat", [13.118022])[0])
-        lon = float(query.get("lon", [77.641051])[0])
-        radius = int(query.get("radius", [2000])[0])
-        res_data = await fetch_tomtom_facilities(lat, lon, radius)
-        return make_response(res_data)
+        if path == "/api/v1/facilities":
+            lat = float(query.get("lat", [13.118022])[0])
+            lon = float(query.get("lon", [77.641051])[0])
+            radius = int(query.get("radius", [2000])[0])
+            res_data = await fetch_tomtom_facilities(lat, lon, radius)
+            return make_response(res_data)
+    except Exception as exc:
+        return make_response({"error": str(exc)}, status=500)
 
     return make_response({"error": "Not Found"}, status=404)
