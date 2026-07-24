@@ -9,11 +9,13 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [refugesData, setRefugesData] = useState(null);
   const [activeRefugeId, setActiveRefugeId] = useState(null);
+  const [isGridView, setIsGridView] = useState(false);
 
   const mapRef = useRef(null);
   const leafletInstance = useRef(null);
   const markersGroup = useRef(null);
   const routePolylineGroup = useRef(null);
+  const cardScrollContainerRef = useRef(null);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -27,7 +29,6 @@ export default function App() {
       zoomControl: false
     });
 
-    // Reliable OpenStreetMap Standard Tile Layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
@@ -38,14 +39,12 @@ export default function App() {
     markersGroup.current = L.layerGroup().addTo(map);
     routePolylineGroup.current = L.layerGroup().addTo(map);
 
-    // Click-and-Confirm Search UX
     map.on('click', (e) => {
       const clickLat = Number(e.latlng.lat.toFixed(6));
       const clickLon = Number(e.latlng.lng.toFixed(6));
       setPendingTarget({ lat: clickLat, lon: clickLon });
     });
 
-    // Invalidate size to ensure tile rendering completes without grey gaps
     setTimeout(() => {
       map.invalidateSize();
     }, 200);
@@ -64,11 +63,13 @@ export default function App() {
   const fetchRefuges = async (lat, lon) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/refuges?lat=${lat}&lon=${lon}&radius=2000`);
+      const res = await fetch(`${API_BASE_URL}/api/v1/refuges?lat=${lat}&lon=${lon}&radius=3000`);
       const data = await res.json();
       setRefugesData(data);
       if (data.top_refuges && data.top_refuges.length > 0) {
         setActiveRefugeId(data.top_refuges[0].id);
+      } else {
+        setActiveRefugeId(null);
       }
     } catch (err) {
       console.error("Failed to fetch refuges:", err);
@@ -81,7 +82,7 @@ export default function App() {
     fetchRefuges(userLocation.lat, userLocation.lon);
   }, []);
 
-  // Update Leaflet Map Markers & Polyline without label overlapping
+  // Update Leaflet Map Markers & Polyline
   useEffect(() => {
     if (!leafletInstance.current || !window.L) return;
     const L = window.L;
@@ -90,7 +91,7 @@ export default function App() {
     if (markersGroup.current) markersGroup.current.clearLayers();
     if (routePolylineGroup.current) routePolylineGroup.current.clearLayers();
 
-    // 1. User Location Dot
+    // User Location Dot
     const userIcon = L.divIcon({
       className: 'custom-user-marker',
       html: `
@@ -106,7 +107,7 @@ export default function App() {
     });
     L.marker([userLocation.lat, userLocation.lon], { icon: userIcon }).addTo(markersGroup.current);
 
-    // 2. Pending Target Search Popup
+    // Pending Target Search Popup
     if (pendingTarget) {
       const targetIcon = L.divIcon({
         className: 'pending-target-icon',
@@ -114,7 +115,7 @@ export default function App() {
           <div class="bg-[#131b2e] text-white p-3 rounded-2xl shadow-2xl border-2 border-[#003ec7] text-center w-52">
             <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">SELECTED SEARCH CENTER</div>
             <div class="text-xs font-mono my-1">${pendingTarget.lat}, ${pendingTarget.lon}</div>
-            <div class="text-[11px] text-gray-300 font-semibold mb-2">Click confirm below to scan 2km</div>
+            <div class="text-[11px] text-gray-300 font-semibold mb-2">Click confirm below to scan 3km</div>
           </div>
         `,
         iconSize: [208, 90],
@@ -127,11 +128,11 @@ export default function App() {
         color: '#003ec7',
         fillColor: '#003ec7',
         fillOpacity: 0.15,
-        radius: 2000
+        radius: 3000
       }).addTo(markersGroup.current);
     }
 
-    // 3. Refuge Markers: Active gets expanded card, Inactive gets clean compact numbered pin badge
+    // Dynamic Refuge Markers: Active gets expanded card, Inactive gets compact numbered pin badge
     const refuges = refugesData?.top_refuges || [];
     const bounds = L.latLngBounds([[userLocation.lat, userLocation.lon]]);
 
@@ -139,30 +140,15 @@ export default function App() {
       const isActive = refuge.id === activeRefugeId;
       bounds.extend([refuge.lat, refuge.lon]);
 
-      // Category Icon Helper
-      const getCategoryIcon = (cat) => {
-        const lower = cat.toLowerCase();
-        if (lower.includes("library")) return "book";
-        if (lower.includes("transit") || lower.includes("bus") || lower.includes("station")) return "directions_bus";
-        if (lower.includes("hospital") || lower.includes("clinic")) return "medical_services";
-        if (lower.includes("stadium") || lower.includes("sports")) return "sports_soccer";
-        return "storefront";
-      };
-
       const markerHtml = isActive ? `
-        <!-- ACTIVE EXPANDED PIN -->
         <div class="relative flex flex-col items-center z-50 transition-all duration-300 transform scale-110">
           <div class="bg-[#003ec7] text-white border-2 border-white px-3 py-2 rounded-xl shadow-2xl flex flex-col items-center gap-0.5 max-w-[200px]">
-            <div class="flex items-center gap-1">
-              <span class="material-symbols-outlined text-xs text-amber-300">${getCategoryIcon(refuge.category)}</span>
-              <span class="font-black text-xs uppercase tracking-tight truncate">${refuge.name}</span>
-            </div>
+            <span class="font-black text-xs uppercase tracking-tight truncate">${refuge.name}</span>
             <span class="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-blue-900 text-blue-100 uppercase">${refuge.category}</span>
           </div>
           <div class="w-3 h-3 bg-[#003ec7] rotate-45 -mt-1.5 shadow-md"></div>
         </div>
       ` : `
-        <!-- INACTIVE COMPACT NUMBERED BADGE (Prevents Label Overlap) -->
         <div class="relative flex flex-col items-center z-30 hover:scale-125 transition-transform duration-200 cursor-pointer">
           <div class="bg-white text-[#003ec7] border-2 border-[#003ec7] size-8 rounded-full shadow-lg flex items-center justify-center font-black text-sm">
             ${idx + 1}
@@ -191,7 +177,6 @@ export default function App() {
       }
     });
 
-    // Auto-fit map bounds so all pins are visible without crowding
     if (refuges.length > 0) {
       map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
     }
@@ -209,73 +194,49 @@ export default function App() {
     setPendingTarget(null);
   };
 
-  const handleSearchSubmit = (e) => {
+  // Search location via OpenStreetMap Nominatim Geocoding
+  const handleSearchSubmit = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    const shifted = {
-      lat: Number((userLocation.lat + 0.01).toFixed(6)),
-      lon: Number((userLocation.lon + 0.01).toFixed(6))
-    };
-    setUserLocation(shifted);
-    fetchRefuges(shifted.lat, shifted.lon);
+    setIsLoading(true);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`);
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const foundLat = Number(data[0].lat);
+        const foundLon = Number(data[0].lon);
+        setUserLocation({ lat: foundLat, lon: foundLon });
+        await fetchRefuges(foundLat, foundLon);
+      } else {
+        alert(`Location "${searchQuery}" not found. Please try another place.`);
+      }
+    } catch (err) {
+      console.error("Geocoding failed:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleGoHere = (lat, lon) => {
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`, '_blank');
   };
 
+  const scrollCards = (direction) => {
+    if (cardScrollContainerRef.current) {
+      const scrollAmount = direction === 'left' ? -350 : 350;
+      cardScrollContainerRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
   const weather = refugesData?.current_weather || {
-    temp_c: 28.0,
-    feelslike_c: 30.0,
-    heat_index_c: 30.0,
-    aqi: 57,
+    temp_c: 25.0,
+    feelslike_c: 26.0,
+    heat_index_c: 27.0,
+    aqi: 35,
     condition: 'Clear'
   };
 
-  const refuges = refugesData?.top_refuges || [
-    {
-      id: "card-1",
-      name: "Central Municipal Library",
-      category: "Library",
-      address: "124 Civic Center Plaza",
-      lat: 13.121022,
-      lon: 77.643051,
-      score: 92.4,
-      distance_m: 412,
-      duration_min: 5,
-      crowd_level: "Low",
-      elevation_m: 931,
-      indoor_cooling: true
-    },
-    {
-      id: "card-2",
-      name: "Metropolitan Underground Concourse",
-      category: "Transit Hub",
-      address: "Central Avenue",
-      lat: 13.119022,
-      lon: 77.635051,
-      score: 84.1,
-      distance_m: 670,
-      duration_min: 8,
-      crowd_level: "Moderate",
-      elevation_m: 845,
-      indoor_cooling: true
-    },
-    {
-      id: "card-3",
-      name: "Community Recreation & Cooling Hub",
-      category: "Community Center",
-      address: "88 Park Avenue",
-      lat: 13.114022,
-      lon: 77.646051,
-      score: 78.0,
-      distance_m: 1200,
-      duration_min: 15,
-      crowd_level: "Moderate",
-      elevation_m: 720,
-      indoor_cooling: true
-    }
-  ];
+  const refuges = refugesData?.top_refuges || [];
 
   return (
     <div className="bg-[#faf8ff] text-[#131b2e] h-screen w-screen overflow-hidden relative flex flex-col font-sans">
@@ -285,7 +246,7 @@ export default function App() {
           <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center border-4 border-[#003ec7]">
             <span className="material-symbols-outlined text-6xl text-[#003ec7] animate-spin mb-4">refresh</span>
             <h2 className="text-3xl font-black text-[#003ec7] tracking-tighter">SCANNED BY KLIMA AI...</h2>
-            <p className="text-sm font-bold text-gray-500 mt-2">Evaluating Weather, AQI & Public Safe Havens...</p>
+            <p className="text-sm font-bold text-gray-500 mt-2">Evaluating Weather, AQI & Dynamic Public Safe Havens...</p>
             <div className="w-64 h-3 bg-gray-200 rounded-full mt-4 overflow-hidden">
               <div className="h-full bg-[#003ec7] w-2/3 animate-pulse rounded-full"></div>
             </div>
@@ -305,10 +266,10 @@ export default function App() {
             <span className="material-symbols-outlined absolute left-3 text-gray-400">search</span>
             <input
               type="text"
-              placeholder="Find a safe spot..."
+              placeholder="Search city/place (e.g., Antarctica, London, Tokyo)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-full text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#003ec7] w-64 shadow-inner"
+              className="pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-full text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#003ec7] w-80 shadow-inner"
             />
           </form>
         </div>
@@ -351,78 +312,134 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom Horizontal Scrollable Location Cards Row */}
-      <footer className="relative z-30 p-6 glass-panel border-t border-gray-200 shadow-2xl">
-        <div className="max-w-7xl mx-auto flex gap-6 overflow-x-auto pb-2 snap-x hide-scrollbar">
-          {refuges.map((refuge, idx) => {
-            const isActive = refuge.id === activeRefugeId;
-            const scoreColor = refuge.score >= 80 ? 'bg-emerald-500 text-white' : refuge.score >= 60 ? 'bg-gray-400 text-white' : 'bg-red-500 text-white';
-            const crowdColor = refuge.crowd_level === 'Low' ? 'text-emerald-600' : refuge.crowd_level === 'Moderate' ? 'text-amber-500' : 'text-red-500';
-
-            return (
-              <div
-                key={refuge.id}
-                onClick={() => setActiveRefugeId(refuge.id)}
-                className={`min-w-[320px] max-w-[360px] flex-shrink-0 snap-center p-5 rounded-3xl cursor-pointer transition-all duration-300 flex flex-col justify-between border-2 ${isActive ? 'card-active' : 'bg-white/90 border-gray-200 hover:border-gray-300'}`}
+      {/* Bottom Accessible Location Cards Section */}
+      <footer className="relative z-30 p-4 glass-panel border-t border-gray-200 shadow-2xl">
+        <div className="max-w-7xl mx-auto flex flex-col gap-2">
+          {/* Accessibility & View Controls Bar */}
+          <div className="flex items-center justify-between px-2 text-xs font-bold text-gray-600">
+            <span className="uppercase tracking-wider">Live Scanned Refuges ({refuges.length})</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsGridView(!isGridView)}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1 rounded-full flex items-center gap-1 transition-colors"
               >
-                <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="bg-[#003ec7] text-white text-xs font-black px-2 py-0.5 rounded-full">{idx + 1}</span>
-                      <div>
-                        <h3 className="text-base font-black text-[#131b2e] tracking-tight uppercase line-clamp-1">{refuge.name}</h3>
-                        <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
+                <span className="material-symbols-outlined text-sm">{isGridView ? 'view_carousel' : 'grid_view'}</span>
+                <span>{isGridView ? 'Horizontal Scroll' : 'Grid View'}</span>
+              </button>
+
+              {!isGridView && (
+                <div className="hidden md:flex items-center gap-1">
+                  <button
+                    onClick={() => scrollCards('left')}
+                    className="size-7 bg-white hover:bg-gray-100 border border-gray-300 rounded-full flex items-center justify-center shadow-sm"
+                  >
+                    <span className="material-symbols-outlined text-sm">chevron_left</span>
+                  </button>
+                  <button
+                    onClick={() => scrollCards('right')}
+                    className="size-7 bg-white hover:bg-gray-100 border border-gray-300 rounded-full flex items-center justify-center shadow-sm"
+                  >
+                    <span className="material-symbols-outlined text-sm">chevron_right</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Location Cards Container with Mouse Wheel Vertical-to-Horizontal Scroll Converter */}
+          {refuges.length > 0 ? (
+            <div
+              ref={cardScrollContainerRef}
+              onWheel={(e) => {
+                if (!isGridView && cardScrollContainerRef.current) {
+                  cardScrollContainerRef.current.scrollLeft += e.deltaY;
+                }
+              }}
+              className={
+                isGridView
+                  ? "grid grid-cols-1 md:grid-cols-3 gap-4 max-h-60 overflow-y-auto p-1"
+                  : "flex gap-5 overflow-x-auto pb-2 pt-1 px-1 snap-x scroll-smooth"
+              }
+            >
+              {refuges.map((refuge, idx) => {
+                const isActive = refuge.id === activeRefugeId;
+                const scoreColor = refuge.score >= 80 ? 'bg-emerald-500 text-white' : refuge.score >= 60 ? 'bg-gray-400 text-white' : 'bg-red-500 text-white';
+                const crowdColor = refuge.crowd_level === 'Low' ? 'text-emerald-600' : refuge.crowd_level === 'Moderate' ? 'text-amber-500' : 'text-red-500';
+
+                return (
+                  <div
+                    key={refuge.id}
+                    onClick={() => setActiveRefugeId(refuge.id)}
+                    className={`
+                      ${isGridView ? 'w-full' : 'min-w-[320px] max-w-[360px] flex-shrink-0 snap-center'}
+                      p-4 rounded-3xl cursor-pointer transition-all duration-300 flex flex-col justify-between border-2
+                      ${isActive ? 'card-active bg-white' : 'bg-white/90 border-gray-200 hover:border-gray-300'}
+                    `}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-[#003ec7] text-white text-xs font-black px-2 py-0.5 rounded-full">{idx + 1}</span>
+                          <div>
+                            <h3 className="text-base font-black text-[#131b2e] tracking-tight uppercase line-clamp-1">{refuge.name}</h3>
+                            <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
+                          </div>
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-black tracking-wider uppercase shadow-sm ${scoreColor}`}>
+                          🛡️ {Math.round(refuge.score)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline justify-between my-2">
+                        <div>
+                          <span className="text-2xl font-black text-[#003ec7] tracking-tight">{Math.round(refuge.duration_min)} MIN</span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase block">WALK TIME</span>
+                        </div>
+                        <div className="text-right">
+                          <span className={`text-xs font-black tracking-wider uppercase ${crowdColor}`}>{refuge.crowd_level.toUpperCase()}</span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase block">CROWD STATUS</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-bold text-gray-600 pt-2 border-t border-gray-100">
+                        <span>⛰️ {Math.round(refuge.elevation_m)}M ELEVATION</span>
+                        <span>📍 {(refuge.distance_m / 1000).toFixed(1)} KM DISTANCE</span>
                       </div>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-black tracking-wider uppercase shadow-sm ${scoreColor}`}>
-                      🛡️ {Math.round(refuge.score)}
-                    </span>
-                  </div>
 
-                  <div className="flex items-baseline justify-between my-3">
-                    <div>
-                      <span className="text-3xl font-black text-[#003ec7] tracking-tight">{Math.round(refuge.duration_min)} MIN</span>
-                      <span className="text-xs font-bold text-gray-400 uppercase block">WALK TIME</span>
+                    <div className="mt-3">
+                      {isActive ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleGoHere(refuge.lat, refuge.lon);
+                          }}
+                          className="w-full bg-[#003ec7] hover:bg-[#003ec7]/90 text-white font-black py-2.5 rounded-2xl text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2"
+                        >
+                          <span className="material-symbols-outlined text-sm">near_me</span>
+                          <span>GO HERE (GOOGLE MAPS)</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveRefugeId(refuge.id);
+                          }}
+                          className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-2.5 rounded-2xl text-xs uppercase tracking-wider transition-colors"
+                        >
+                          VIEW REFUGE
+                        </button>
+                      )}
                     </div>
-                    <div className="text-right">
-                      <span className={`text-sm font-black tracking-wider uppercase ${crowdColor}`}>{refuge.crowd_level.toUpperCase()}</span>
-                      <span className="text-xs font-bold text-gray-400 uppercase block">CROWD STATUS</span>
-                    </div>
                   </div>
-
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-600 pt-2 border-t border-gray-100">
-                    <span>⛰️ {Math.round(refuge.elevation_m)}M ELEVATION</span>
-                    <span>📍 {(refuge.distance_m / 1000).toFixed(1)} KM DISTANCE</span>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  {isActive ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleGoHere(refuge.lat, refuge.lon);
-                      }}
-                      className="w-full bg-[#003ec7] hover:bg-[#003ec7]/90 text-white font-black py-3 rounded-2xl text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2"
-                    >
-                      <span className="material-symbols-outlined text-sm">near_me</span>
-                      <span>GO HERE (GOOGLE MAPS)</span>
-                    </button>
-                  ) : (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveRefugeId(refuge.id);
-                      }}
-                      className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-2xl text-xs uppercase tracking-wider transition-colors"
-                    >
-                      VIEW REFUGE
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-sm font-bold text-gray-500">
+              Click anywhere on the map or search a city to scan live safe havens...
+            </div>
+          )}
         </div>
       </footer>
     </div>
