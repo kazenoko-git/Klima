@@ -27,10 +27,10 @@ export default function App() {
       zoomControl: false
     });
 
-    // CartoDB Voyager Tile Layer
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    // Reliable OpenStreetMap Standard Tile Layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap &copy; CARTO'
+      attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
     L.control.zoom({ position: 'topright' }).addTo(map);
@@ -44,6 +44,11 @@ export default function App() {
       const clickLon = Number(e.latlng.lng.toFixed(6));
       setPendingTarget({ lat: clickLat, lon: clickLon });
     });
+
+    // Invalidate size to ensure tile rendering completes without grey gaps
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
 
     leafletInstance.current = map;
 
@@ -76,7 +81,7 @@ export default function App() {
     fetchRefuges(userLocation.lat, userLocation.lon);
   }, []);
 
-  // Update Leaflet Map Markers & Polyline
+  // Update Leaflet Map Markers & Polyline without label overlapping
   useEffect(() => {
     if (!leafletInstance.current || !window.L) return;
     const L = window.L;
@@ -85,21 +90,19 @@ export default function App() {
     if (markersGroup.current) markersGroup.current.clearLayers();
     if (routePolylineGroup.current) routePolylineGroup.current.clearLayers();
 
-    map.panTo([userLocation.lat, userLocation.lon]);
-
-    // 1. User Pulsing Location Dot
+    // 1. User Location Dot
     const userIcon = L.divIcon({
       className: 'custom-user-marker',
       html: `
-        <div class="relative flex items-center justify-center size-12">
+        <div class="relative flex items-center justify-center size-10">
           <div class="absolute inset-0 bg-[#003ec7]/40 rounded-full animate-ping"></div>
-          <div class="relative bg-[#003ec7] size-6 rounded-full border-2 border-white shadow-xl flex items-center justify-center">
-            <div class="bg-white size-2 rounded-full"></div>
+          <div class="relative bg-[#003ec7] size-5 rounded-full border-2 border-white shadow-xl flex items-center justify-center">
+            <div class="bg-white size-1.5 rounded-full"></div>
           </div>
         </div>
       `,
-      iconSize: [48, 48],
-      iconAnchor: [24, 24]
+      iconSize: [40, 40],
+      iconAnchor: [20, 20]
     });
     L.marker([userLocation.lat, userLocation.lon], { icon: userIcon }).addTo(markersGroup.current);
 
@@ -115,7 +118,7 @@ export default function App() {
           </div>
         `,
         iconSize: [208, 90],
-        iconAnchor: [104, 100]
+        iconAnchor: [104, 90]
       });
       
       L.marker([pendingTarget.lat, pendingTarget.lon], { icon: targetIcon }).addTo(markersGroup.current);
@@ -128,26 +131,51 @@ export default function App() {
       }).addTo(markersGroup.current);
     }
 
-    // 3. Refuge Pin Markers with Correct Pointer Alignment & Category Badges
+    // 3. Refuge Markers: Active gets expanded card, Inactive gets clean compact numbered pin badge
     const refuges = refugesData?.top_refuges || [];
-    refuges.forEach((refuge) => {
+    const bounds = L.latLngBounds([[userLocation.lat, userLocation.lon]]);
+
+    refuges.forEach((refuge, idx) => {
       const isActive = refuge.id === activeRefugeId;
-      const markerHtml = `
-        <div class="relative flex flex-col items-center group ${isActive ? 'z-40 scale-110' : 'z-20 opacity-90'} transition-all duration-300">
-          <div class="${isActive ? 'bg-[#003ec7] text-white border-2 border-white' : 'bg-white text-[#131b2e] border border-gray-300'} px-3 py-2 rounded-xl shadow-2xl flex flex-col items-center gap-0.5">
-            <span class="font-black text-xs uppercase tracking-tight whitespace-nowrap">${refuge.name}</span>
-            <span class="text-[9px] font-extrabold px-2 py-0.5 rounded-full ${isActive ? 'bg-blue-800 text-blue-100' : 'bg-gray-100 text-gray-700'} uppercase">${refuge.category}</span>
+      bounds.extend([refuge.lat, refuge.lon]);
+
+      // Category Icon Helper
+      const getCategoryIcon = (cat) => {
+        const lower = cat.toLowerCase();
+        if (lower.includes("library")) return "book";
+        if (lower.includes("transit") || lower.includes("bus") || lower.includes("station")) return "directions_bus";
+        if (lower.includes("hospital") || lower.includes("clinic")) return "medical_services";
+        if (lower.includes("stadium") || lower.includes("sports")) return "sports_soccer";
+        return "storefront";
+      };
+
+      const markerHtml = isActive ? `
+        <!-- ACTIVE EXPANDED PIN -->
+        <div class="relative flex flex-col items-center z-50 transition-all duration-300 transform scale-110">
+          <div class="bg-[#003ec7] text-white border-2 border-white px-3 py-2 rounded-xl shadow-2xl flex flex-col items-center gap-0.5 max-w-[200px]">
+            <div class="flex items-center gap-1">
+              <span class="material-symbols-outlined text-xs text-amber-300">${getCategoryIcon(refuge.category)}</span>
+              <span class="font-black text-xs uppercase tracking-tight truncate">${refuge.name}</span>
+            </div>
+            <span class="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-blue-900 text-blue-100 uppercase">${refuge.category}</span>
           </div>
-          <!-- Pointer Tip pointing exactly to GPS coordinate -->
-          <div class="w-3 h-3 ${isActive ? 'bg-[#003ec7]' : 'bg-white border-b border-r border-gray-300'} rotate-45 -mt-1.5 shadow-md"></div>
+          <div class="w-3 h-3 bg-[#003ec7] rotate-45 -mt-1.5 shadow-md"></div>
+        </div>
+      ` : `
+        <!-- INACTIVE COMPACT NUMBERED BADGE (Prevents Label Overlap) -->
+        <div class="relative flex flex-col items-center z-30 hover:scale-125 transition-transform duration-200 cursor-pointer">
+          <div class="bg-white text-[#003ec7] border-2 border-[#003ec7] size-8 rounded-full shadow-lg flex items-center justify-center font-black text-sm">
+            ${idx + 1}
+          </div>
+          <div class="w-2 h-2 bg-[#003ec7] rotate-45 -mt-1"></div>
         </div>
       `;
 
       const refugeIcon = L.divIcon({
         className: 'custom-refuge-marker',
         html: markerHtml,
-        iconSize: [160, 60],
-        iconAnchor: [80, 60]
+        iconSize: isActive ? [200, 60] : [32, 40],
+        iconAnchor: isActive ? [100, 60] : [16, 40]
       });
 
       const m = L.marker([refuge.lat, refuge.lon], { icon: refugeIcon }).addTo(markersGroup.current);
@@ -163,6 +191,15 @@ export default function App() {
       }
     });
 
+    // Auto-fit map bounds so all pins are visible without crowding
+    if (refuges.length > 0) {
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
+    }
+
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+
   }, [refugesData, activeRefugeId, userLocation, pendingTarget]);
 
   const handleConfirmSearch = () => {
@@ -176,8 +213,8 @@ export default function App() {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     const shifted = {
-      lat: Number((userLocation.lat + 0.006).toFixed(6)),
-      lon: Number((userLocation.lon + 0.006).toFixed(6))
+      lat: Number((userLocation.lat + 0.01).toFixed(6)),
+      lon: Number((userLocation.lon + 0.01).toFixed(6))
     };
     setUserLocation(shifted);
     fetchRefuges(shifted.lat, shifted.lon);
@@ -190,9 +227,9 @@ export default function App() {
   const weather = refugesData?.current_weather || {
     temp_c: 28.0,
     feelslike_c: 30.0,
-    heat_index_c: 31.0,
-    aqi: 45,
-    condition: 'Partly Cloudy'
+    heat_index_c: 30.0,
+    aqi: 57,
+    condition: 'Clear'
   };
 
   const refuges = refugesData?.top_refuges || [
@@ -248,7 +285,7 @@ export default function App() {
           <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center border-4 border-[#003ec7]">
             <span className="material-symbols-outlined text-6xl text-[#003ec7] animate-spin mb-4">refresh</span>
             <h2 className="text-3xl font-black text-[#003ec7] tracking-tighter">SCANNED BY KLIMA AI...</h2>
-            <p className="text-sm font-bold text-gray-500 mt-2">Evaluating Weather, AQI & Diverse Safe Havens...</p>
+            <p className="text-sm font-bold text-gray-500 mt-2">Evaluating Weather, AQI & Public Safe Havens...</p>
             <div className="w-64 h-3 bg-gray-200 rounded-full mt-4 overflow-hidden">
               <div className="h-full bg-[#003ec7] w-2/3 animate-pulse rounded-full"></div>
             </div>
@@ -317,7 +354,7 @@ export default function App() {
       {/* Bottom Horizontal Scrollable Location Cards Row */}
       <footer className="relative z-30 p-6 glass-panel border-t border-gray-200 shadow-2xl">
         <div className="max-w-7xl mx-auto flex gap-6 overflow-x-auto pb-2 snap-x hide-scrollbar">
-          {refuges.map((refuge) => {
+          {refuges.map((refuge, idx) => {
             const isActive = refuge.id === activeRefugeId;
             const scoreColor = refuge.score >= 80 ? 'bg-emerald-500 text-white' : refuge.score >= 60 ? 'bg-gray-400 text-white' : 'bg-red-500 text-white';
             const crowdColor = refuge.crowd_level === 'Low' ? 'text-emerald-600' : refuge.crowd_level === 'Moderate' ? 'text-amber-500' : 'text-red-500';
@@ -330,12 +367,15 @@ export default function App() {
               >
                 <div>
                   <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="text-lg font-black text-[#131b2e] tracking-tight uppercase line-clamp-1">{refuge.name}</h3>
-                      <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="bg-[#003ec7] text-white text-xs font-black px-2 py-0.5 rounded-full">{idx + 1}</span>
+                      <div>
+                        <h3 className="text-base font-black text-[#131b2e] tracking-tight uppercase line-clamp-1">{refuge.name}</h3>
+                        <p className="text-xs font-semibold text-gray-500 line-clamp-1">{refuge.address}</p>
+                      </div>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase shadow-sm ${scoreColor}`}>
-                      🛡️ {Math.round(refuge.score)} SCORE
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-black tracking-wider uppercase shadow-sm ${scoreColor}`}>
+                      🛡️ {Math.round(refuge.score)}
                     </span>
                   </div>
 
