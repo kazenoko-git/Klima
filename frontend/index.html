@@ -4,9 +4,46 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Klima | Immersive Climate Refuge Navigator</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700;800;900&family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "on-surface-variant": "#434656",
+            "surface-variant": "#dae2fd",
+            "surface-tint": "#004ced",
+            "surface-container": "#eaedff",
+            "outline": "#737688",
+            "secondary-container": "#82f5c1",
+            "surface-bright": "#faf8ff",
+            "tertiary-container": "#cd003c",
+            "on-primary": "#ffffff",
+            "secondary": "#006c4a",
+            "surface-container-lowest": "#ffffff",
+            "primary-container": "#0052ff",
+            "primary": "#003ec7",
+            "on-primary-container": "#dfe3ff",
+            "on-surface": "#131b2e",
+            "background": "#faf8ff",
+            "surface-dim": "#d2d9f4",
+            "tertiary": "#a0002d",
+            "surface": "#faf8ff",
+            "inverse-surface": "#283044"
+          },
+          fontFamily: {
+            "display-lg": ["Atkinson Hyperlegible Next", "sans-serif"],
+            "body-lg": ["Inter", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
 </head>
 <body class="bg-[#faf8ff] text-[#131b2e] h-screen w-screen overflow-hidden relative">
   <div id="root"></div>
