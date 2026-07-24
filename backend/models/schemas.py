@@ -1,4 +1,5 @@
 from typing import List, Optional
+import json
 
 try:
     from pydantic import BaseModel
@@ -37,6 +38,7 @@ if HAS_PYDANTIC:
     class RefugeResponse(BaseModel):
         current_weather: WeatherInfo
         top_refuges: List[VenueRefuge]
+        ai_engine_status: str = "Evaluated via MCDA Engine"
 else:
     from dataclasses import dataclass, asdict
 
@@ -80,9 +82,11 @@ else:
     class RefugeResponse:
         current_weather: WeatherInfo
         top_refuges: List[VenueRefuge]
+        ai_engine_status: str = "Evaluated via MCDA Engine"
 
         def model_dump(self):
             return {
                 "current_weather": self.current_weather.model_dump() if hasattr(self.current_weather, "model_dump") else asdict(self.current_weather),
-                "top_refuges": [r.model_dump() if hasattr(r, "model_dump") else asdict(r) for r in self.top_refuges]
+                "top_refuges": [r.model_dump() if hasattr(r, "model_dump") else asdict(r) for r in self.top_refuges],
+                "ai_engine_status": self.ai_engine_status
             }
