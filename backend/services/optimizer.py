@@ -37,7 +37,6 @@ def calculate_mcda_safety_score(
     crowd_level: str,
     elevation_m: float
 ) -> float:
-    """Computes an objective multi-criteria safety score (0.0 to 100.0)."""
     heat_index = weather_data.get("heat_index_c", 25.0)
     aqi = weather_data.get("aqi", 30)
     
@@ -74,7 +73,6 @@ def calculate_mcda_safety_score(
     return round(max(10.0, min(100.0, total_score)), 1)
 
 async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Passes climate & location telemetry to Google AI Studio via Python requests."""
     if not getattr(settings, "GEMINI_API_KEY", None):
         return {}
 
@@ -121,7 +119,6 @@ async def evaluate_venues_with_gemini(weather_data: Dict[str, Any], venues_data:
     return {}
 
 async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m: int = 2000) -> RefugeResponse:
-    """Consolidates data and ranks facilities using MCDA scoring & Gemini API."""
     weather_task = fetch_weather_data(user_lat, user_lon)
     facilities_task = fetch_tomtom_facilities(user_lat, user_lon, radius_m)
     
@@ -196,7 +193,8 @@ async def calculate_and_rank_refuges(user_lat: float, user_lon: float, radius_m:
 
     ranked_venues.sort(key=lambda v: v.score, reverse=True)
 
+    # Return top 5 ranked safe zones to support scrollable bottom location menu
     return RefugeResponse(
         current_weather=weather_info,
-        top_refuges=ranked_venues[:3]
+        top_refuges=ranked_venues[:5]
     )
