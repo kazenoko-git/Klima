@@ -18,14 +18,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Dependencies
+      - name: Install Wrangler
         run: npm install -g wrangler@4.112.0
 
       - name: Deploy to Cloudflare Workers
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: wrangler deploy --commit-dirty=true
+        run: wrangler deploy
 
   deploy-frontend:
     name: Deploy Frontend to Cloudflare Pages
