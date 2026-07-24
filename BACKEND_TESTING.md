@@ -1,31 +1,25 @@
 # Klima Backend Testing Guide (Cloudflare Workers)
 
-This document provides a step-by-step guide for testing the FastAPI backend **strictly through Cloudflare Workers**—both locally using Wrangler worker emulation and on live Cloudflare Workers deployment.
+This document provides a step-by-step guide for testing the FastAPI backend **strictly through Cloudflare Workers**—both locally using Wrangler worker emulation and on our live deployed Cloudflare Worker edge instance.
 
 ---
 
-## 1. Local Testing via Cloudflare Workers (`wrangler dev`)
+## 1. Production Live Cloudflare Worker URL
 
-To test the backend worker locally on your machine using Cloudflare's exact edge runtime emulator:
-
-### Step 1: Start Wrangler Local Worker Emulator
-In your terminal at the root of `Klima`, run:
-```bash
-npx wrangler dev
-```
-> **Local Worker URL:** `http://localhost:8787` or `http://127.0.0.1:8787`
+Our backend is deployed live on Cloudflare Workers edge network:
+* **Base URL:** `https://klima-backend.kazenoko-main.workers.dev`
 
 ---
 
-## 2. API Endpoints Test Suite (Cloudflare Workers Local & Live)
+## 2. API Endpoints Test Suite (Cloudflare Workers Live & Local)
 
-Replace `http://localhost:8787` with your live Cloudflare Worker URL (e.g., `https://klima-backend.<your-subdomain>.workers.dev`) when testing production.
+You can run these exact cURL commands against the live production worker URL or locally using `npx wrangler dev` (`http://localhost:8787`).
 
 ### Endpoint 1: Edge Worker Health Check
 * **Method:** `GET`
 * **cURL Command:**
   ```bash
-  curl -X GET "http://localhost:8787/"
+  curl -X GET "https://klima-backend.kazenoko-main.workers.dev/"
   ```
 * **Expected Response (`200 OK`):**
   ```json
@@ -48,65 +42,65 @@ Consolidates WeatherAPI, TomTom Search, BestTime.app crowds, OpenRouteService wa
   - `radius` (int, optional): Search radius in meters (default: `2000`)
 * **cURL Command:**
   ```bash
-  curl -X GET "http://localhost:8787/api/v1/refuges?lat=13.118022&lon=77.641051&radius=2000"
+  curl -X GET "https://klima-backend.kazenoko-main.workers.dev/api/v1/refuges?lat=13.118022&lon=77.641051&radius=2000"
   ```
-* **Expected Response (`200 OK`):**
+* **Verified Live Response (`200 OK`):**
   ```json
   {
     "current_weather": {
-      "temp_c": 38.5,
-      "feelslike_c": 42.0,
-      "heat_index_c": 43.2,
-      "aqi": 156,
-      "condition": "Clear"
+      "temp_c": 25.3,
+      "feelslike_c": 26.2,
+      "heat_index_c": 27.5,
+      "aqi": 35,
+      "condition": "Partly cloudy"
     },
     "top_refuges": [
       {
-        "id": "loc_1",
-        "name": "Central City Library",
-        "category": "Library",
-        "address": "124 Civic Center Plaza",
-        "lat": 13.121022,
-        "lon": 77.643051,
-        "score": 92.4,
-        "distance_m": 412.5,
-        "duration_min": 4.9,
-        "crowd_level": "Low",
-        "elevation_m": 18.5,
+        "id": "tomtom_niAmYW4C0kUt32j8tHrpsQ",
+        "name": "Delhi Public School",
+        "category": "high school",
+        "address": "35/1A, Bagalur Cross Road, Bagalur, Bengaluru 562149, Karnataka",
+        "lat": 13.118699,
+        "lon": 77.641793,
+        "score": 79.4,
+        "distance_m": 110.1,
+        "duration_min": 1.3,
+        "crowd_level": "Moderate",
+        "elevation_m": 931.0,
         "indoor_cooling": true,
         "polyline": [
           [13.118022, 77.641051],
-          [13.119522, 77.642051],
-          [13.121022, 77.643051]
+          [13.1183605, 77.641422],
+          [13.118699, 77.641793]
         ]
       },
       {
-        "id": "loc_3",
-        "name": "Community Recreation Hub",
-        "category": "Community Center",
-        "address": "88 Park Avenue",
-        "lat": 13.119022,
-        "lon": 77.635051,
-        "score": 87.1,
-        "distance_m": 670.0,
-        "duration_min": 8.0,
+        "id": "tomtom_JpPe0L6Cm6yUtBvmQH0BTw",
+        "name": "Westline Public School",
+        "category": "high school",
+        "address": "1St Main Bande Road, Srinivaspur, Tirumanahalli, Bengaluru 560064, Karnataka",
+        "lat": 13.104045,
+        "lon": 77.633575,
+        "score": 71.2,
+        "distance_m": 1752.4,
+        "duration_min": 20.9,
         "crowd_level": "Moderate",
-        "elevation_m": 22.0,
+        "elevation_m": 921.0,
         "indoor_cooling": true,
         "polyline": [...]
       },
       {
-        "id": "loc_2",
-        "name": "Metropolitan Underground Station",
-        "category": "Transit Station",
-        "address": "45 Main Street",
-        "lat": 13.114022,
-        "lon": 77.646051,
-        "score": 74.0,
-        "distance_m": 720.0,
-        "duration_min": 8.6,
-        "crowd_level": "High",
-        "elevation_m": 12.0,
+        "id": "tomtom_iWNW4vw4PaMLGjm40eV6BA",
+        "name": "Lumbini International Public School",
+        "category": "pre school",
+        "address": "52/1, Palanahalli Road, Srinivaspur, Tirumanahalli, Bengaluru 560064, Karnataka",
+        "lat": 13.116028,
+        "lon": 77.624724,
+        "score": 71.1,
+        "distance_m": 1782.0,
+        "duration_min": 21.2,
+        "crowd_level": "Moderate",
+        "elevation_m": 908.0,
         "indoor_cooling": true,
         "polyline": [...]
       }
@@ -120,7 +114,7 @@ Consolidates WeatherAPI, TomTom Search, BestTime.app crowds, OpenRouteService wa
 * **Method:** `GET`
 * **cURL Command:**
   ```bash
-  curl -X GET "http://localhost:8787/api/v1/weather?lat=13.118022&lon=77.641051"
+  curl -X GET "https://klima-backend.kazenoko-main.workers.dev/api/v1/weather?lat=13.118022&lon=77.641051"
   ```
 
 ---
@@ -129,19 +123,13 @@ Consolidates WeatherAPI, TomTom Search, BestTime.app crowds, OpenRouteService wa
 * **Method:** `GET`
 * **cURL Command:**
   ```bash
-  curl -X GET "http://localhost:8787/api/v1/facilities?lat=13.118022&lon=77.641051&radius=2000"
+  curl -X GET "https://klima-backend.kazenoko-main.workers.dev/api/v1/facilities?lat=13.118022&lon=77.641051&radius=2000"
   ```
 
 ---
 
-## 3. Live Cloudflare Worker Verification
+## 3. Local Emulator Testing (`npx wrangler dev`)
 
-To deploy directly to Cloudflare Workers from CLI (or via GitHub Actions):
-```bash
-npx wrangler deploy
-```
-
-Once deployed, test using your worker endpoint:
-```bash
-curl -X GET "https://klima-backend.<YOUR-SUBDOMAIN>.workers.dev/api/v1/refuges?lat=13.118022&lon=77.641051"
-```
+To test locally using Cloudflare's Wrangler emulator:
+1. Run `npx wrangler dev` in terminal.
+2. Replace `https://klima-backend.kazenoko-main.workers.dev` with `http://localhost:8787` in any of the cURL commands above.
