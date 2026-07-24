@@ -133,14 +133,7 @@ async def fetch_weather_data(lat: float, lon: float) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Open-Meteo fallback error: {e}")
-        return {
-            "temp_c": 25.0,
-            "feelslike_c": 26.0,
-            "heat_index_c": 27.0,
-            "aqi": 35,
-            "condition": "Clear",
-            "is_raining": False
-        }
+        return "No data recieved"
 
 async def fetch_tomtom_facilities(lat: float, lon: float, radius_m: int = 3000) -> List[Dict[str, Any]]:
     """
